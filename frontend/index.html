@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>trade-engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oxygen+Mono&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    :root {
+      --accent: #2563eb;
+      --accent-light: #dbeafe;
+      --line: #e2e8f0;
+      --muted: #64748b;
+      --ok: #16a34a;
+      --warn: #ca8a04;
+      --err: #dc2626;
+    }
+    * { font-family: 'Oxygen Mono', ui-monospace, monospace !important; }
+    body { background: #ffffff; color: #0f172a; }
+    .panel { border: 1px solid var(--line); border-radius: 4px; }
+    .panel-head { border-bottom: 1px solid var(--line); padding: 8px 14px; background: #f8fafc; font-size: 12px; letter-spacing: .04em; color: var(--muted); text-transform: uppercase; }
+    .panel-body { padding: 14px; }
+    .btn { padding: 6px 14px; border: 1px solid var(--accent); color: var(--accent); background: white; border-radius: 3px; font-size: 13px; transition: all .15s; cursor: pointer; }
+    .btn:hover { background: var(--accent); color: white; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-ghost { border-color: var(--line); color: var(--muted); }
+    .btn-ghost:hover { background: #f1f5f9; color: #0f172a; border-color: var(--line); }
+    .btn-danger { border-color: var(--err); color: var(--err); }
+    .btn-danger:hover { background: var(--err); color: white; }
+    .input, .select { padding: 6px 10px; border: 1px solid var(--line); border-radius: 3px; font-size: 13px; background: white; }
+    .input:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 11px; border-radius: 999px; border: 1px solid var(--line); }
+    .pill-ok { color: var(--ok); border-color: var(--ok); background: #f0fdf4; }
+    .pill-warn { color: var(--warn); border-color: var(--warn); background: #fefce8; }
+    .pill-muted { color: var(--muted); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .dot-ok { background: var(--ok); box-shadow: 0 0 0 2px #f0fdf4; }
+    .dot-warn { background: var(--warn); }
+    .dot-err { background: var(--err); }
+    .dot-muted { background: #cbd5e1; }
+    table { width: 100%; font-size: 13px; }
+    table th { text-align: left; padding: 6px 8px; font-weight: normal; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    table td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }
+    pre { font-size: 11px; background: #f8fafc; padding: 10px; border-radius: 3px; border: 1px solid var(--line); overflow-x: auto; }
+    .toast-container { position: fixed; top: 20px; right: 20px; z-index: 50; width: 320px; }
+    .toast { background: white; border: 1px solid var(--line); border-left: 3px solid var(--accent); padding: 10px 14px; margin-bottom: 8px; border-radius: 3px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,.06); animation: toastIn .25s ease-out; }
+    .toast-ok { border-left-color: var(--ok); }
+    .toast-err { border-left-color: var(--err); }
+    @keyframes toastIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    /* Flow viz */
+    .flow-node { transition: all .4s ease; }
+    .flow-node-active circle { fill: var(--accent-light); stroke: var(--accent); stroke-width: 2; }
+    .flow-node-active text { fill: var(--accent); font-weight: bold; }
+    .flow-edge { stroke: #cbd5e1; stroke-width: 1.5; transition: all .4s ease; }
+    .flow-edge-active { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 3; animation: flowDash 1s linear infinite; }
+    @keyframes flowDash { to { stroke-dashoffset: -18; } }
+    .blink { animation: blink 1s ease-in-out infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .header-bar { border-bottom: 1px solid var(--line); padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; background: #fafafa; }
+  </style>
+</head>
+<body x-data="app()" x-init="init()">
+
+<!-- Toasts -->
+<div class="toast-container">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast" :class="t.kind === 'err' ? 'toast-err' : 'toast-ok'" x-text="t.msg"></div>
+  </template>
+</div>
+
+<!-- Header -->
+<div class="header-bar">
+  <div>
+    <div style="font-size: 16px; font-weight: bold; color: var(--accent);">trade-engine</div>
+    <div style="font-size: 11px; color: var(--muted);">portfolio execution engine — 5 brokers — mock fills</div>
+  </div>
+  <div style="display: flex; gap: 12px; align-items: center;">
+    <span class="pill" :class="wsState === 'open' ? 'pill-ok' : (wsState === 'fallback' ? 'pill-warn' : 'pill-muted')">
+      <span class="dot" :class="wsState === 'open' ? 'dot-ok blink' : (wsState === 'fallback' ? 'dot-warn' : 'dot-muted')"></span>
+      <span x-text="wsState === 'open' ? 'WS LIVE' : (wsState === 'fallback' ? 'POLL FALLBACK' : 'WS OFFLINE')"></span>
+    </span>
+    <template x-if="user">
+      <span style="font-size: 12px; color: var(--muted);" x-text="'> ' + user.email"></span>
+    </template>
+    <template x-if="user">
+      <button @click="logout()" class="btn btn-ghost">logout</button>
+    </template>
+  </div>
+</div>
+
+<div class="max-w-6xl mx-auto p-6">
+
+  <!-- ============ NOT LOGGED IN ============ -->
+  <template x-if="!user">
+    <div class="panel" style="max-width: 420px; margin: 80px auto;">
+      <div class="panel-head">$ auth.signup_or_login</div>
+      <div class="panel-body space-y-3">
+        <input class="input w-full" type="email" placeholder="email" x-model="form.email" />
+        <input class="input w-full" type="password" placeholder="password" x-model="form.password" />
+        <div class="flex gap-2">
+          <button class="btn btn-primary flex-1" @click="signup()">signup</button>
+          <button class="btn flex-1" @click="login()">login</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ============ LOGGED IN ============ -->
+  <template x-if="user">
+    <div class="space-y-5 mt-4">
+
+      <!-- ── FLOW VISUALIZATION ── -->
+      <div class="panel">
+        <div class="panel-head">$ flow.live</div>
+        <div class="panel-body" style="padding: 8px;">
+          <svg viewBox="0 0 720 220" style="width: 100%; height: 220px;">
+            <!-- Edges (4 left-to-right + 1 down to Notifier) -->
+            <line class="flow-edge" :class="edgeActive(0) && 'flow-edge-active'" x1="100" y1="80" x2="220" y2="80" />
+            <line class="flow-edge" :class="edgeActive(1) && 'flow-edge-active'" x1="280" y1="80" x2="400" y2="80" />
+            <line class="flow-edge" :class="edgeActive(2) && 'flow-edge-active'" x1="460" y1="80" x2="580" y2="80" />
+            <line class="flow-edge" :class="edgeActive(3) && 'flow-edge-active'" x1="370" y1="110" x2="370" y2="170" />
+
+            <!-- Arrowheads -->
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#cbd5e1" />
+              </marker>
+              <marker id="arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
+              </marker>
+            </defs>
+
+            <!-- USER -->
+            <g class="flow-node" :class="nodeActive('user') && 'flow-node-active'">
+              <circle cx="70" cy="80" r="32" fill="white" stroke="#cbd5e1" stroke-width="1.5" />
+              <text x="70" y="84" text-anchor="middle" font-size="13" fill="#475569">USER</text>
+            </g>
+            <!-- API -->
+            <g class="flow-node" :class="nodeActive('api') && 'flow-node-active'">
+              <circle cx="250" cy="80" r="32" fill="white" stroke="#cbd5e1" stroke-width="1.5" />
+              <text x="250" y="84" text-anchor="middle" font-size="13" fill="#475569">API</text>
+            </g>
+            <!-- ENGINE -->
+            <g class="flow-node" :class="nodeActive('engine') && 'flow-node-active'">
+              <circle cx="430" cy="80" r="32" fill="white" stroke="#cbd5e1" stroke-width="1.5" />
+              <text x="430" y="84" text-anchor="middle" font-size="13" fill="#475569">ENGINE</text>
+            </g>
+            <!-- BROKER -->
+            <g class="flow-node" :class="nodeActive('broker') && 'flow-node-active'">
+              <circle cx="610" cy="80" r="32" fill="white" stroke="#cbd5e1" stroke-width="1.5" />
+              <text x="610" y="84" text-anchor="middle" font-size="13" fill="#475569">BROKER</text>
+            </g>
+            <!-- NOTIFIER -->
+            <g class="flow-node" :class="nodeActive('notifier') && 'flow-node-active'">
+              <circle cx="370" cy="190" r="28" fill="white" stroke="#cbd5e1" stroke-width="1.5" />
+              <text x="370" y="194" text-anchor="middle" font-size="12" fill="#475569">NOTIFY</text>
+            </g>
+
+            <!-- Stage label -->
+            <text x="360" y="20" text-anchor="middle" font-size="11" fill="#94a3b8" x-text="flowLabel"></text>
+          </svg>
+        </div>
+      </div>
+
+      <!-- ── BROKERS ── -->
+      <div class="panel">
+        <div class="panel-head">$ brokers.status</div>
+        <div class="panel-body">
+          <table>
+            <thead>
+              <tr><th>broker</th><th>auth flow</th><th>credentials</th><th>connection</th><th></th></tr>
+            </thead>
+            <tbody>
+              <template x-for="row in brokerStatus" :key="row.broker_name">
+                <tr>
+                  <td style="font-weight: 500;" x-text="row.broker_name"></td>
+                  <td style="color: var(--muted); font-size: 12px;" x-text="(authFlows[row.broker_name] || {}).flow || '—'"></td>
+                  <td>
+                    <span class="pill" :class="row.has_credentials ? 'pill-ok' : 'pill-muted'">
+                      <span class="dot" :class="row.has_credentials ? 'dot-ok' : 'dot-muted'"></span>
+                      <span x-text="row.has_credentials ? 'saved' : 'not set'"></span>
+                    </span>
+                  </td>
+                  <td>
+                    <span class="pill" :class="row.is_connected ? 'pill-ok' : 'pill-muted'">
+                      <span class="dot" :class="row.is_connected ? 'dot-ok' : 'dot-muted'"></span>
+                      <span x-text="row.is_connected ? 'live' : 'offline'"></span>
+                    </span>
+                  </td>
+                  <td style="text-align: right;">
+                    <button class="btn btn-ghost" @click="openCredsForm(row.broker_name)">configure</button>
+                    <template x-if="row.has_credentials && !row.is_connected">
+                      <button class="btn" @click="startConnect(row.broker_name)">connect</button>
+                    </template>
+                    <template x-if="row.is_connected">
+                      <button class="btn btn-ghost" @click="loadHoldings(row.broker_name)">holdings</button>
+                    </template>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+
+          <!-- Credentials form -->
+          <template x-if="credsOpen">
+            <div class="panel" style="margin-top: 14px;">
+              <div class="panel-head">$ credentials.<span x-text="creds.broker_name"></span></div>
+              <div class="panel-body space-y-2">
+                <div style="font-size: 11px; color: var(--muted);">
+                  api_key + <span x-text="(authFlows[creds.broker_name] || {}).secret_label || 'API Secret'"></span> for <span x-text="creds.broker_name"></span>.
+                  <template x-if="creds.broker_name === 'angel'"> client_code goes in the secret slot.</template>
+                </div>
+                <input class="input w-full" placeholder="api_key" x-model="creds.api_key" />
+                <input class="input w-full" type="password"
+                       :placeholder="(authFlows[creds.broker_name] || {}).secret_label || 'api_secret'"
+                       x-model="creds.api_secret" />
+                <div class="flex gap-2">
+                  <button class="btn btn-primary" @click="saveCreds()">save</button>
+                  <button class="btn btn-ghost" @click="credsOpen = false">cancel</button>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- Connect dialog (varies by broker auth flow) -->
+          <template x-if="pendingConnect">
+            <div class="panel" style="margin-top: 14px; border-color: var(--accent);">
+              <div class="panel-head" style="color: var(--accent);">
+                $ connect.<span x-text="pendingConnect.broker"></span>
+              </div>
+              <div class="panel-body space-y-2">
+                <!-- redirect-style -->
+                <template x-if="pendingConnect.flow === 'redirect'">
+                  <div class="space-y-2">
+                    <div style="font-size: 12px;">1. login window opened. After redirect, copy the
+                      <code style="color: var(--accent);" x-text="pendingConnect.field_label"></code>
+                      from the URL bar.</div>
+                    <input class="input w-full" :placeholder="pendingConnect.field_label" x-model="pendingConnect.token" />
+                    <div class="flex gap-2">
+                      <button class="btn btn-primary" @click="finishConnect()">submit</button>
+                      <button class="btn btn-ghost" @click="pendingConnect = null">cancel</button>
+                    </div>
+                  </div>
+                </template>
+                <!-- server-side (groww) -->
+                <template x-if="pendingConnect.flow === 'server'">
+                  <div class="space-y-2">
+                    <div style="font-size: 12px;">no browser redirect needed — server exchanges keys for token directly.</div>
+                    <div class="flex gap-2">
+                      <button class="btn btn-primary" @click="finishConnect()">authenticate</button>
+                      <button class="btn btn-ghost" @click="pendingConnect = null">cancel</button>
+                    </div>
+                  </div>
+                </template>
+                <!-- TOTP (angel) -->
+                <template x-if="pendingConnect.flow === 'totp'">
+                  <div class="space-y-2">
+                    <div style="font-size: 12px;">enter your trading PIN and current TOTP from the authenticator app.</div>
+                    <div class="flex gap-2">
+                      <input class="input flex-1" placeholder="PIN"  x-model="pendingConnect.pin" />
+                      <input class="input flex-1" placeholder="TOTP" x-model="pendingConnect.totp" />
+                    </div>
+                    <div class="flex gap-2">
+                      <button class="btn btn-primary" @click="finishConnect()">authenticate</button>
+                      <button class="btn btn-ghost" @click="pendingConnect = null">cancel</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ── EXECUTE ── -->
+      <div class="panel">
+        <div class="panel-head">$ execute.batch</div>
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>action</th><th>symbol</th><th>exch</th><th>qty</th><th></th></tr></thead>
+            <tbody>
+              <template x-for="(inst, idx) in execForm.instructions" :key="idx">
+                <tr>
+                  <td>
+                    <select class="select" x-model="inst.action">
+                      <option>BUY</option><option>SELL</option><option>REBALANCE</option>
+                    </select>
+                  </td>
+                  <td><input class="input" style="width: 140px" x-model="inst.symbol" /></td>
+                  <td><input class="input" style="width: 90px"  x-model="inst.exchange" /></td>
+                  <td><input class="input" style="width: 80px"  type="number" min="1" x-model.number="inst.quantity" /></td>
+                  <td><button class="btn btn-ghost" @click="execForm.instructions.splice(idx,1)">×</button></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div class="flex gap-2 items-center mt-3">
+            <select class="select" x-model="execForm.broker_name">
+              <template x-for="b in brokerStatus" :key="b.broker_name">
+                <option :value="b.broker_name" x-text="b.broker_name"
+                        :disabled="!b.has_credentials"></option>
+              </template>
+            </select>
+            <button class="btn btn-ghost" @click="addInstruction()">+ row</button>
+            <button class="btn btn-primary ml-auto" @click="executeBatch()">execute →</button>
+          </div>
+
+          <template x-if="lastBatch">
+            <div style="margin-top: 14px;">
+              <div style="font-size: 12px; color: var(--muted);">
+                batch <span style="color: var(--accent);" x-text="'#' + lastBatch.batch_id"></span> ·
+                <span x-text="lastBatch.status"></span> ·
+                <span x-text="lastBatch.summary.filled + ' filled / ' + lastBatch.summary.failed + ' failed / ' + lastBatch.summary.total + ' total'"></span>
+              </div>
+              <pre x-text="JSON.stringify(lastBatch.orders, null, 2)"></pre>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ── HOLDINGS (mock + real side by side) ── -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div class="panel">
+          <div class="panel-head">$ holdings.mock <span style="float:right;cursor:pointer" @click="loadMockHoldings()">↻</span></div>
+          <div class="panel-body">
+            <template x-if="mockHoldings.length === 0">
+              <div style="color: var(--muted); font-size: 12px;">no mock holdings yet — execute a batch.</div>
+            </template>
+            <template x-if="mockHoldings.length > 0">
+              <table>
+                <thead><tr><th>symbol</th><th>exch</th><th>qty</th><th>avg</th></tr></thead>
+                <tbody>
+                  <template x-for="h in mockHoldings" :key="h.symbol+'-'+h.exchange">
+                    <tr>
+                      <td x-text="h.symbol"></td>
+                      <td x-text="h.exchange"></td>
+                      <td x-text="h.quantity"></td>
+                      <td x-text="h.avg_price"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </template>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">$ holdings.real</div>
+          <div class="panel-body">
+            <template x-if="holdings.length === 0">
+              <div style="color: var(--muted); font-size: 12px;">click "holdings" on a connected broker.</div>
+            </template>
+            <template x-if="holdings.length > 0">
+              <table>
+                <thead><tr><th>symbol</th><th>exch</th><th>qty</th><th>avg</th><th>ltp</th><th>p&l</th></tr></thead>
+                <tbody>
+                  <template x-for="h in holdings" :key="h.symbol">
+                    <tr>
+                      <td x-text="h.symbol"></td>
+                      <td x-text="h.exchange"></td>
+                      <td x-text="h.quantity"></td>
+                      <td x-text="h.avg_price"></td>
+                      <td x-text="h.ltp"></td>
+                      <td x-text="h.pnl"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── NOTIFICATIONS ── -->
+      <div class="panel">
+        <div class="panel-head">$ notifications.stream</div>
+        <div class="panel-body" style="max-height: 300px; overflow-y: auto;">
+          <template x-if="notifications.length === 0">
+            <div style="color: var(--muted); font-size: 12px;">stream is quiet. trigger an execute.</div>
+          </template>
+          <template x-for="(n, idx) in notifications" :key="idx">
+            <div style="border-bottom: 1px solid #f1f5f9; padding: 8px 0; font-size: 12px;">
+              <span style="color: var(--muted);" x-text="'[' + new Date(n.received_at).toLocaleTimeString() + ']'"></span>
+              <span style="color: var(--accent); margin-left: 6px;" x-text="n.event"></span>
+              <span style="margin-left: 6px;" x-text="'batch #' + n.data.batch_id + ' → ' + n.data.status + ' (' + n.data.summary.filled + '/' + n.data.summary.total + ')'"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </template>
+</div>
+
+<script>
+function app() {
+  return {
+    user: null,
+    form: { email: "", password: "" },
+    creds: { broker_name: "zerodha", api_key: "", api_secret: "" },
+    credsOpen: false,
+    brokerStatus: [],
+    authFlows: {},
+    pendingConnect: null,
+    execForm: { broker_name: "zerodha", instructions: [{ action: "BUY", symbol: "RELIANCE", exchange: "NSE", quantity: 1 }] },
+    lastBatch: null,
+    holdings: [],
+    mockHoldings: [],
+    notifications: [],
+    toasts: [],
+    nextToastId: 1,
+    ws: null, wsState: "offline",
+    pollTimer: null,
+    activeStages: new Set(),
+    flowLabel: "idle",
+
+    // ─── toast helpers ───
+    flash(msg, kind = "ok") {
+      const id = this.nextToastId++;
+      this.toasts.push({ id, msg, kind });
+      setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 4000);
+    },
+
+    // ─── flow viz helpers ───
+    nodeActive(name) { return this.activeStages.has(name); },
+    edgeActive(idx) {
+      // edges: 0=user→api, 1=api→engine, 2=engine→broker, 3=engine→notifier
+      const flow = ["user", "api", "engine", "broker", "notifier"];
+      const pairs = [[0,1],[1,2],[2,3],[2,4]];
+      const [a, b] = pairs[idx];
+      return this.activeStages.has(flow[a]) && this.activeStages.has(flow[b]);
+    },
+    setStage(name, label) {
+      this.activeStages.add(name);
+      if (label) this.flowLabel = label;
+    },
+    resetFlow() {
+      setTimeout(() => { this.activeStages = new Set(); this.flowLabel = "idle"; }, 2500);
+    },
+
+    // ─── http ───
+    async api(path, opts = {}) {
+      const res = await fetch(path, {
+        method: opts.method || "GET",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+      });
+      const text = await res.text();
+      let data;
+      try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      return data;
+    },
+
+    async init() {
+      try {
+        this.user = await this.api("/auth/me");
+        await this.refreshAll();
+        this.openWebSocket();
+      } catch { /* not logged in */ }
+    },
+
+    async refreshAll() {
+      const [statuses, flows] = await Promise.all([
+        this.api("/settings/broker-status"),
+        this.api("/broker/auth-flows"),
+      ]);
+      this.brokerStatus = statuses;
+      this.authFlows = flows;
+      try { await this.loadMockHoldings(); } catch {}
+    },
+
+    // ─── auth ───
+    async signup() {
+      try {
+        this.user = await this.api("/auth/signup", { method: "POST", body: this.form });
+        await this.refreshAll();
+        this.openWebSocket();
+        this.flash("signed up");
+      } catch (e) { this.flash(e.message, "err"); }
+    },
+    async login() {
+      try {
+        this.user = await this.api("/auth/login", { method: "POST", body: this.form });
+        await this.refreshAll();
+        this.openWebSocket();
+        this.flash("logged in");
+      } catch (e) { this.flash(e.message, "err"); }
+    },
+    async logout() {
+      try { this.ws && this.ws.close(); } catch {}
+      if (this.pollTimer) clearInterval(this.pollTimer);
+      await this.api("/auth/logout", { method: "POST" });
+      this.user = null; this.brokerStatus = []; this.holdings = []; this.mockHoldings = [];
+      this.notifications = []; this.lastBatch = null; this.wsState = "offline";
+    },
+
+    // ─── credentials ───
+    openCredsForm(broker) {
+      this.creds = { broker_name: broker, api_key: "", api_secret: "" };
+      this.credsOpen = true;
+    },
+    async saveCreds() {
+      try {
+        await this.api("/settings/broker-credentials", { method: "POST", body: this.creds });
+        await this.refreshAll();
+        this.credsOpen = false;
+        this.flash(`credentials saved for ${this.creds.broker_name}`);
+      } catch (e) { this.flash(e.message, "err"); }
+    },
+
+    // ─── connect ───
+    async startConnect(broker) {
+      const flowMeta = this.authFlows[broker] || {};
+      const flow = flowMeta.flow || "redirect";
+      this.pendingConnect = {
+        broker, flow,
+        field_label: flowMeta.field_label || "request_token",
+        token: "", pin: "", totp: "",
+      };
+      if (flow === "redirect") {
+        try {
+          const { login_url } = await this.api(`/broker/${broker}/login-url`);
+          if (login_url) window.open(login_url, "_blank");
+        } catch (e) { this.flash(e.message, "err"); }
+      }
+    },
+    async finishConnect() {
+      try {
+        let token = "";
+        if (this.pendingConnect.flow === "redirect") token = this.pendingConnect.token;
+        else if (this.pendingConnect.flow === "totp") token = `${this.pendingConnect.pin}:${this.pendingConnect.totp}`;
+        // server-side: token stays empty
+        await this.api(`/broker/${this.pendingConnect.broker}/callback`, {
+          method: "POST", body: { request_token: token },
+        });
+        const broker = this.pendingConnect.broker;
+        this.pendingConnect = null;
+        await this.refreshAll();
+        this.flash(`${broker} connected`);
+      } catch (e) { this.flash(e.message, "err"); }
+    },
+
+    // ─── execute ───
+    addInstruction() { this.execForm.instructions.push({ action: "BUY", symbol: "", exchange: "NSE", quantity: 1 }); },
+    async executeBatch() {
+      try {
+        this.activeStages = new Set();
+        this.setStage("user", "user → api");
+        await new Promise(r => setTimeout(r, 200));
+        this.setStage("api", "validating + persisting");
+        const r = await this.api("/execute", { method: "POST", body: this.execForm });
+        this.setStage("engine", "engine running batch #" + r.batch_id);
+        await new Promise(r => setTimeout(r, 300));
+        this.setStage("broker", "broker quotes / mock fills");
+        // The websocket (or polling fallback) fires the notifier stage when batch completes.
+        this._lastPendingBatch = r.batch_id;
+        this.flash(`batch ${r.batch_id} accepted`);
+        // If WS isn't open, kick off a quick poll for this batch
+        if (this.wsState !== "open") this.pollBatchUntilDone(r.batch_id);
+      } catch (e) {
+        this.activeStages = new Set();
+        this.flowLabel = "error";
+        this.flash(e.message, "err");
+      }
+    },
+    onBatchComplete(data) {
+      this.lastBatch = data;
+      this.setStage("notifier", "notification dispatched");
+      this.notifications.unshift({ event: "batch_complete", data, received_at: Date.now() });
+      this.loadMockHoldings();
+      this.resetFlow();
+    },
+
+    async loadMockHoldings() {
+      try {
+        const { holdings } = await this.api("/mock-holdings");
+        this.mockHoldings = holdings;
+      } catch {}
+    },
+    async loadHoldings(broker) {
+      try {
+        const { holdings } = await this.api(`/broker/${broker}/holdings`);
+        this.holdings = holdings;
+        this.flash(`loaded ${holdings.length} ${broker} holdings`);
+      } catch (e) { this.flash(e.message, "err"); }
+    },
+
+    // ─── websocket with polling fallback ───
+    openWebSocket() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const url = `${proto}://${location.host}/ws/notifications`;
+      try {
+        this.ws = new WebSocket(url);
+      } catch {
+        this.startPollingFallback();
+        return;
+      }
+      this.wsState = "connecting";
+      const failTimer = setTimeout(() => {
+        if (this.wsState !== "open") {
+          try { this.ws.close(); } catch {}
+          this.startPollingFallback();
+        }
+      }, 3000);
+
+      this.ws.onopen = () => { clearTimeout(failTimer); this.wsState = "open"; };
+      this.ws.onmessage = (ev) => {
+        try {
+          const m = JSON.parse(ev.data);
+          if (m.event === "batch_complete") this.onBatchComplete(m.data);
+        } catch {}
+      };
+      this.ws.onclose = () => {
+        if (this.wsState === "open") {
+          this.startPollingFallback();
+        } else if (this.wsState === "connecting") {
+          this.startPollingFallback();
+        }
+      };
+      this.ws.onerror = () => {
+        // onclose will fire next; fallback handled there
+      };
+    },
+    startPollingFallback() {
+      if (this.wsState === "fallback") return;
+      this.wsState = "fallback";
+      // Lightweight: only poll when there's a pending batch we're tracking.
+    },
+    async pollBatchUntilDone(batchId) {
+      const start = Date.now();
+      while (Date.now() - start < 30000) {
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          const b = await this.api(`/batches/${batchId}`);
+          if (b.status !== "PENDING") {
+            this.onBatchComplete({
+              batch_id: b.batch_id, broker_name: b.broker_name,
+              status: b.status, summary: b.summary, orders: b.orders,
+            });
+            return;
+          }
+        } catch {}
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    container_name: trade-engine
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me-for-prod}
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRE_HOURS=24
+      - DATABASE_URL=sqlite:////app/data/app.db
+    restart: unless-stopped
